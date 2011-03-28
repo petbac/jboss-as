@@ -29,11 +29,16 @@ import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.ROL
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.ROLLBACK_ON_RUNTIME_FAILURE;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.ROLLED_BACK;
 import static org.jboss.as.controller.descriptions.ModelDescriptionConstants.SUCCESS;
+import static org.jboss.as.server.deployment.Services.JBOSS_DEPLOYMENT_SUB_UNIT;
+import static org.jboss.as.server.deployment.Services.JBOSS_DEPLOYMENT_UNIT;
 
 import java.io.InputStream;
+import java.util.Collections;
 import java.util.EnumMap;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.SortedSet;
 import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.ExecutorService;
@@ -62,16 +67,24 @@ import org.jboss.as.controller.persistence.ConfigurationPersisterProvider;
 import org.jboss.as.controller.persistence.ExtensibleConfigurationPersister;
 import org.jboss.as.controller.registry.ModelNodeRegistration;
 import org.jboss.as.server.controller.descriptions.ServerDescriptionProviders;
+import org.jboss.as.server.deployment.AbstractDeploymentUnitService;
+import org.jboss.as.server.deployment.Attachments;
+import org.jboss.as.server.deployment.DeploymentUnit;
 import org.jboss.as.server.deployment.DeploymentUnitProcessor;
 import org.jboss.as.server.deployment.Phase;
 import org.jboss.as.server.deployment.api.DeploymentRepository;
 import org.jboss.dmr.ModelNode;
 import org.jboss.dmr.Property;
 import org.jboss.logging.Logger;
+import org.jboss.msc.service.AbstractServiceListener;
 import org.jboss.msc.service.DelegatingServiceRegistry;
 import org.jboss.msc.service.ServiceContainer;
+import org.jboss.msc.service.ServiceController;
+import org.jboss.msc.service.ServiceListener;
+import org.jboss.msc.service.ServiceName;
 import org.jboss.msc.service.ServiceRegistry;
 import org.jboss.msc.service.ServiceTarget;
+import org.jboss.msc.service.StartException;
 
 /**
  * @author <a href="mailto:david.lloyd@redhat.com">David M. Lloyd</a>
@@ -89,16 +102,17 @@ class ServerControllerImpl extends BasicModelController implements ServerControl
     private final ExtensibleConfigurationPersister extensibleConfigurationPersister;
     private final DeploymentRepository deploymentRepository;
     private final EnumMap<Phase, SortedSet<RegisteredProcessor>> deployers = new EnumMap<Phase, SortedSet<RegisteredProcessor>>(Phase.class);
+    private final ServerStateMonitorListener serverStateMonitorListener = new ServerStateMonitorListener();
 
     ServerControllerImpl(final ServiceContainer container, final ServiceTarget serviceTarget, final ServerEnvironment serverEnvironment,
             final ExtensibleConfigurationPersister configurationPersister, final DeploymentRepository deploymentRepository,
             final ExecutorService executorService) {
         super(ServerControllerModelUtil.createCoreModel(), configurationPersister, ServerDescriptionProviders.ROOT_PROVIDER);
         this.serviceTarget = serviceTarget;
-        this.extensibleConfigurationPersister = configurationPersister;
+        extensibleConfigurationPersister = configurationPersister;
         this.serverEnvironment = serverEnvironment;
         this.deploymentRepository = deploymentRepository;
-        this.serviceRegistry = new DelegatingServiceRegistry(container);
+        serviceRegistry = new DelegatingServiceRegistry(container);
         this.executorService = executorService;
     }
 
@@ -149,6 +163,10 @@ class ServerControllerImpl extends BasicModelController implements ServerControl
     @Override
     public State getState() {
         return state.getReference();
+    }
+
+    ServiceListener<Object> getServerStateMonitorListener() {
+        return serverStateMonitorListener;
     }
 
     /** {@inheritDoc} */
@@ -227,6 +245,100 @@ class ServerControllerImpl extends BasicModelController implements ServerControl
             (!operation.hasDefined(ROLLBACK_ON_RUNTIME_FAILURE) || operation.get(ROLLBACK_ON_RUNTIME_FAILURE).asBoolean());
     }
 
+    /**
+     * A service listener to track container status.  Must be present when the service is created, or results will
+     * be unpredictable.
+     */
+    private class ServerStateMonitorListener extends AbstractServiceListener<Object> {
+        private final AtomicInteger busyServiceCount = new AtomicInteger();
+        private final Set<ServiceController<?>> failedControllers = Collections.newSetFromMap(Collections.synchronizedMap(new IdentityHashMap<ServiceController<?>, Boolean>()));
+        private final Set<ServiceController<? extends DeploymentUnit>> deploymentUnitControllers = Collections.newSetFromMap(Collections.synchronizedMap(new IdentityHashMap<ServiceController<? extends DeploymentUnit>, Boolean>()));
+
+        @SuppressWarnings( { "unchecked" })
+        public void listenerAdded(final ServiceController<?> serviceController) {
+            if (isDeploymentUnit(serviceController)) {
+                log.infof("XXXX Adding to deployment unit %s", serviceController);
+                deploymentUnitControllers.add((ServiceController<? extends DeploymentUnit>) serviceController);
+            }
+        }
+
+        public void serviceStarted(final ServiceController<?> controller) {
+            tick();
+        }
+
+        public void serviceFailed(final ServiceController<?> controller, final StartException reason) {
+            failedControllers.add(controller);
+            tick();
+        }
+
+        public void serviceRemoveRequested(final ServiceController<?> controller) {
+            busyServiceCount.getAndIncrement();
+        }
+
+        public void serviceRemoved(final ServiceController<?> controller) {
+            tick();
+            if (isDeploymentUnit(controller)) {
+                deploymentUnitControllers.remove(controller);
+            }
+        }
+
+        public void serviceStopped(final ServiceController<?> controller) {
+            tick();
+        }
+
+        public void serviceStartRequested(final ServiceController<?> controller) {
+            busyServiceCount.getAndIncrement();
+        }
+
+        public void serviceStartRequestCleared(final ServiceController<?> controller) {
+            tick();
+        }
+
+        public void failedServiceStarting(final ServiceController<?> controller) {
+            failedControllers.remove(controller);
+            busyServiceCount.getAndIncrement();
+        }
+
+        public void failedServiceStopped(final ServiceController<?> controller) {
+            failedControllers.remove(controller);
+        }
+
+        public void serviceStopRequested(final ServiceController<?> controller) {
+            busyServiceCount.getAndIncrement();
+        }
+
+        public void serviceStopRequestCleared(final ServiceController<?> controller) {
+            tick();
+        }
+
+        /*
+        TODO - count for PROBLEM state
+         */
+
+        /**
+         * Tick down the count, triggering a deployment status report when the count is zero.
+         */
+        private void tick() {
+            if (busyServiceCount.decrementAndGet() == 0) {
+                log.info("XXXX REPORTING STATUS");
+                for (ServiceController<? extends DeploymentUnit> controller : deploymentUnitControllers) try {
+                    controller.getValue().getAttachment(Attachments.STATUS_LISTENER).explainStatus();
+                } catch (Throwable t) {
+                    log.warnf(t, "Failed to report status for deployment unit service %s", controller.getName());
+                }
+            }
+        }
+
+        private boolean isDeploymentUnit(final ServiceController<?> serviceController) {
+            ServiceName baseNameOne = serviceController.getName().getParent();
+            if (baseNameOne != null && baseNameOne.equals(JBOSS_DEPLOYMENT_UNIT)) {
+                return true;
+            }
+            ServiceName baseNameZero = baseNameOne.getParent();
+            return baseNameZero != null && baseNameZero.equals(JBOSS_DEPLOYMENT_SUB_UNIT);
+        }
+    }
+
     private class ServerOperationContextImpl extends OperationContextImpl implements ServerOperationContext, RuntimeOperationContext {
         // -1 as initial value ensures the CAS in revertRestartRequired()
         // will never succeed unless restartRequired() is called
@@ -244,8 +356,8 @@ class ServerControllerImpl extends BasicModelController implements ServerControl
 
         @Override
         public synchronized void restartRequired() {
-            AtomicStampedReference<State> stateRef = ServerControllerImpl.this.state;
-            int newStamp = ServerControllerImpl.this.stamp.incrementAndGet();
+            AtomicStampedReference<State> stateRef = state;
+            int newStamp = stamp.incrementAndGet();
             int[] receiver = new int[1];
             // Keep trying until stateRef is RESTART_REQUIRED with our stamp
             for (;;) {
@@ -263,8 +375,7 @@ class ServerControllerImpl extends BasicModelController implements ServerControl
         @Override
         public synchronized void revertRestartRequired() {
             // If 'state' still has the state we last set in restartRequired(), change to RUNNING
-            ServerControllerImpl.this.state.compareAndSet(State.RESTART_REQUIRED, State.RUNNING,
-                    ourStamp, ServerControllerImpl.this.stamp.incrementAndGet());
+            state.compareAndSet(State.RESTART_REQUIRED, State.RUNNING, ourStamp, stamp.incrementAndGet());
         }
 
         @Override
@@ -337,7 +448,7 @@ class ServerControllerImpl extends BasicModelController implements ServerControl
         private ModelNode rollbackOperation;
 
         public RollbackAwareResultHandler(ResultHandler resultHandler) {
-            this.delegate = resultHandler;
+            delegate = resultHandler;
         }
 
         @Override
@@ -411,7 +522,7 @@ class ServerControllerImpl extends BasicModelController implements ServerControl
         }
 
         private void setRollbackOperation(ModelNode compensatingOperation) {
-            this.rollbackOperation = compensatingOperation;
+            rollbackOperation = compensatingOperation;
         }
     }
 
@@ -442,10 +553,10 @@ class ServerControllerImpl extends BasicModelController implements ServerControl
                     Runnable r = new Runnable() {
                         @Override
                         public void run() {
-                            ServerControllerImpl.this.execute(OperationBuilder.Factory.create(compensatingOp).build(), rollbackResultHandler);
+                            execute(OperationBuilder.Factory.create(compensatingOp).build(), rollbackResultHandler);
                         }
                     };
-                    ServerControllerImpl.this.executorService.execute(r);
+                    executorService.execute(r);
                 } else {
                     super.handleFailures();
                 }

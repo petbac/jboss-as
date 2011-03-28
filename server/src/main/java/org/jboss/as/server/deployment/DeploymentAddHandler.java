@@ -58,7 +58,7 @@ public class DeploymentAddHandler implements ModelAddOperationHandler, Descripti
 
     public static final String OPERATION_NAME = ADD;
 
-    static final ModelNode getOperation(ModelNode address, ModelNode state) {
+    static ModelNode getOperation(ModelNode address, ModelNode state) {
         ModelNode op = Util.getEmptyOperation(OPERATION_NAME, address);
         op.get(RUNTIME_NAME).set(state.get(RUNTIME_NAME));
         op.get(HASH).set(state.get(HASH));
@@ -72,9 +72,9 @@ public class DeploymentAddHandler implements ModelAddOperationHandler, Descripti
 
     public DeploymentAddHandler(final DeploymentRepository deploymentRepository) {
         this.deploymentRepository = deploymentRepository;
-        this.validator.registerValidator(RUNTIME_NAME, new StringLengthValidator(1, Integer.MAX_VALUE, true, false));
-        this.validator.registerValidator(HASH, new ModelTypeValidator(ModelType.BYTES, true));
-        this.validator.registerValidator(INPUT_STREAM_INDEX, new ModelTypeValidator(ModelType.INT, true));
+        validator.registerValidator(RUNTIME_NAME, new StringLengthValidator(1, Integer.MAX_VALUE, true, false));
+        validator.registerValidator(HASH, new ModelTypeValidator(ModelType.BYTES, true));
+        validator.registerValidator(INPUT_STREAM_INDEX, new ModelTypeValidator(ModelType.INT, true));
     }
 
     @Override
