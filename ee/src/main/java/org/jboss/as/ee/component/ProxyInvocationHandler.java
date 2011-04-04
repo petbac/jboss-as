@@ -29,8 +29,6 @@ import java.util.IdentityHashMap;
 import java.util.Map;
 import org.jboss.invocation.Interceptor;
 import org.jboss.invocation.InterceptorContext;
-import org.jboss.invocation.InterceptorFactory;
-import org.jboss.invocation.SimpleInterceptorFactoryContext;
 
 /**
  * An invocation handler for a component proxy.
@@ -49,15 +47,6 @@ public final class ProxyInvocationHandler implements InvocationHandler {
      */
     public ProxyInvocationHandler(final Interceptor interceptor) {
         this.interceptor = interceptor;
-    }
-
-    /**
-     * Construct a new instance.
-     *
-     * @param interceptorFactory the factory from which to construct a new interceptor instance
-     */
-    public ProxyInvocationHandler(final InterceptorFactory interceptorFactory) {
-        interceptor = interceptorFactory.create(new SimpleInterceptorFactoryContext());
     }
 
     /** {@inheritDoc} */

@@ -26,10 +26,8 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 /**
  * @author <a href="mailto:david.lloyd@redhat.com">David M. Lloyd</a>
@@ -40,7 +38,6 @@ public final class EEModuleDescription {
     private final Map<String, AbstractComponentDescription> componentsByName = new HashMap<String, AbstractComponentDescription>();
     private final Map<String, AbstractComponentDescription> componentsByClassName = new HashMap<String, AbstractComponentDescription>();
     private final List<InjectionFactory> injectionFactories = new ArrayList<InjectionFactory>();
-    private final Map<String, Set<AbstractComponentDescription>> componentsByViewName = new HashMap<String, Set<AbstractComponentDescription>>();
     private final BindingsContainer bindingsContainer;
 
     /**
@@ -52,7 +49,7 @@ public final class EEModuleDescription {
     public EEModuleDescription(final String appName, final String moduleName) {
         this.appName = appName;
         this.moduleName = moduleName;
-        this.bindingsContainer = new BindingsContainer();
+        bindingsContainer = new BindingsContainer();
     }
 
     /**
@@ -77,14 +74,6 @@ public final class EEModuleDescription {
         }
         componentsByName.put(componentName, description);
         componentsByClassName.put(componentClassName, description);
-        for(String viewName : description.getViewClassNames()) {
-            Set<AbstractComponentDescription> viewComponents = componentsByViewName.get(viewName);
-            if(viewComponents == null) {
-                viewComponents = new HashSet<AbstractComponentDescription>();
-                componentsByViewName.put(viewName, viewComponents);
-            }
-            viewComponents.add(description);
-        }
     }
 
     public String getAppName() {
@@ -117,14 +106,6 @@ public final class EEModuleDescription {
 
     public List<InjectionFactory> getInjectionFactories() {
         return Collections.unmodifiableList(injectionFactories);
-    }
-
-    public Map<String, Set<AbstractComponentDescription>> getComponentsByViewName() {
-        return Collections.unmodifiableMap(componentsByViewName);
-    }
-
-    public Set<AbstractComponentDescription> getComponentsForViewName(final String name) {
-        return componentsByViewName.get(name);
     }
 
     public BindingsContainer getBindingsContainer() {

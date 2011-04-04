@@ -1,6 +1,6 @@
 /*
  * JBoss, Home of Professional Open Source.
- * Copyright 2010, Red Hat, Inc., and individual contributors
+ * Copyright 2011, Red Hat, Inc., and individual contributors
  * as indicated by the @author tags. See the copyright.txt file in the
  * distribution for a full listing of individual contributors.
  *
@@ -23,7 +23,6 @@
 package org.jboss.as.ee.component;
 
 
-import org.jboss.as.naming.ManagedReference;
 import org.jboss.as.naming.context.NamespaceContextSelector;
 import org.jboss.invocation.Interceptor;
 import org.jboss.invocation.InterceptorContext;
@@ -31,7 +30,6 @@ import org.jboss.invocation.InterceptorFactory;
 import org.jboss.invocation.InterceptorFactoryContext;
 import org.jboss.invocation.InterceptorInstanceFactory;
 import org.jboss.invocation.SimpleInterceptorFactoryContext;
-import org.jboss.msc.service.ServiceName;
 import org.jboss.msc.value.InjectedValue;
 
 import java.lang.reflect.Method;
@@ -43,7 +41,6 @@ import java.util.IdentityHashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 import static org.jboss.as.ee.component.SecurityActions.getContextClassLoader;
 import static org.jboss.as.ee.component.SecurityActions.setContextClassLoader;
@@ -82,7 +79,6 @@ public abstract class AbstractComponent implements Component {
     private final Map<Method, InterceptorFactory> interceptorFactoryMap;
     private final Map<Class<?>, List<LifecycleInterceptorFactory>> interceptorPreDestroys;
     private final InjectedValue<NamespaceContextSelector> namespaceContextSelectorInjector = new InjectedValue<NamespaceContextSelector>();
-    private final Map<Class<?>, ServiceName> viewServices;
     private final Map<Class<?>, ComponentView> views = new HashMap<Class<?>, ComponentView>();
     @Deprecated
     private final Collection<Method> componentMethods;
@@ -105,7 +101,6 @@ public abstract class AbstractComponent implements Component {
         interceptorFactoryMap = configuration.getInterceptorFactoryMap();
         interceptorPreDestroys = configuration.getInterceptorPreDestroys();
         this.componentInjectors = configuration.getComponentInjectors();
-        this.viewServices = new HashMap<Class<?>, ServiceName>(configuration.getViewServices());
         this.componentMethods = configuration.getComponentMethods();
     }
 
@@ -356,59 +351,6 @@ public abstract class AbstractComponent implements Component {
         return Collections.unmodifiableList(resourceInjections);
     }
 
-    /**
-     * {@inheritDoc}
-     */
-    public ComponentEntry createClient(final Class<?> viewClass) {
-        final ComponentView view = views.get(viewClass);
-        if (view == null) {
-            throw new IllegalArgumentException("Non-existent view " + viewClass + " requested");
-        }
-        final ManagedReference managedReference = view.getReference();
-        final Method[] methods = view.getProxyFactory().getCachedMethods();
-        final IdentityHashMap<Method, Interceptor> interceptorMap = new IdentityHashMap<Method, Interceptor>();
-        final SimpleInterceptorFactoryContext interceptorFactoryContext = new SimpleInterceptorFactoryContext();
-        for (Method method : methods) {
-            final InterceptorFactory interceptorFactory = interceptorFactoryMap.get(method);
-            if (interceptorFactory != null) {
-                interceptorMap.put(method, interceptorFactory.create(interceptorFactoryContext));
-            }
-        }
-        final Set<Method> allowedMethods = Collections.unmodifiableSet(interceptorFactoryMap.keySet());
-        return new ComponentEntry() {
-            public Component getComponent() {
-                return AbstractComponent.this;
-            }
-
-            public Class<?> getViewClass() {
-                return viewClass;
-            }
-
-            public Collection<Method> allowedMethods() {
-                return allowedMethods;
-            }
-
-            public Interceptor getEntryPoint(final Method method) throws IllegalArgumentException {
-                Interceptor interceptor = interceptorMap.get(method);
-                if (interceptor == null) {
-                    throw new IllegalArgumentException("No entry point found for " + method);
-                }
-                return interceptor;
-            }
-
-            public boolean isAsynchronous(final Method method) throws IllegalArgumentException {
-                if (! interceptorMap.containsKey(method)) {
-                    throw new IllegalArgumentException("No entry point found for " + method);
-                }
-                return false;
-            }
-
-            public void destroy() {
-                managedReference.release();
-            }
-        };
-    }
-
     public NamespaceContextSelector getNamespaceContextSelector() {
         return namespaceContextSelectorInjector.getValue();
     }
@@ -478,10 +420,6 @@ public abstract class AbstractComponent implements Component {
         }
     }
 
-    void addComponentView(ComponentView view) {
-        views.put(view.getViewClass(), view);
-    }
-
     /**
      * Because interceptors are bound to a methods identity, you need the exact method
      * so find the interceptor. This should really be done during deployment via
@@ -501,13 +439,5 @@ public abstract class AbstractComponent implements Component {
 
     public ComponentView getComponentView(Class<?> viewClass) {
         return views.get(viewClass);
-    }
-
-    public Map<Class<?>, ServiceName> getViewServices() {
-        return Collections.unmodifiableMap(viewServices);
-    }
-
-    void removeComponentView(ComponentView view) {
-        views.remove(view.getViewClass());
     }
 }

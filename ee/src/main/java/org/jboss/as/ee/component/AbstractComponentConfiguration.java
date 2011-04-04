@@ -36,7 +36,6 @@ import java.util.IdentityHashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 /**
  * The construction parameter set passed in to an abstract component.
@@ -57,12 +56,11 @@ public abstract class AbstractComponentConfiguration {
     private final Map<Class<?>, ProxyFactory<?>> proxyFactories = new IdentityHashMap<Class<?>, ProxyFactory<?>>();
     private final List<ComponentInjector> componentInjectors = new ArrayList<ComponentInjector>();
     private final Map<ServiceName, InjectedValue<Object>> dependencyInjections = new HashMap<ServiceName, InjectedValue<Object>>();
-    private final Map<Class<?>, ServiceName> viewServices = new HashMap<Class<?>, ServiceName>();
     private final Map<Class<?>, List<LifecycleInterceptorFactory>> interceptorPreDestroys = new HashMap<Class<?>, List<LifecycleInterceptorFactory>>();
+    private final List<ViewConfiguration> views = new ArrayList<ViewConfiguration>();
     private Class<?> componentClass;
     private List<InterceptorFactory> componentInstanceSystemInterceptorFactories = new LinkedList<InterceptorFactory>();
     private Collection<Method> componentMethods;
-
 
     /**
      * Construct a new instance.
@@ -203,9 +201,8 @@ public abstract class AbstractComponentConfiguration {
         return dependencyInjections;
     }
 
-
-    protected Map<Class<?>, ServiceName> getViewServices() {
-        return viewServices;
+    public List<ViewConfiguration> getViews() {
+        return views;
     }
 
     /**

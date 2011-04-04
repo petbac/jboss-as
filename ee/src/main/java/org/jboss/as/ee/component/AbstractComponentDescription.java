@@ -35,6 +35,7 @@ import org.jboss.invocation.SimpleInterceptorInstanceFactory;
 import org.jboss.invocation.proxy.MethodIdentifier;
 import org.jboss.invocation.proxy.ProxyFactory;
 import org.jboss.modules.Module;
+import org.jboss.modules.ModuleClassLoader;
 import org.jboss.msc.service.ServiceBuilder;
 import org.jboss.msc.service.ServiceName;
 import org.jboss.msc.value.InjectedValue;
@@ -91,6 +92,8 @@ public abstract class AbstractComponentDescription extends AbstractLifecycleCapa
     private boolean excludeDefaultInterceptors = false;
     private final BindingsContainer bindingsContainer;
     private DeploymentDescriptorEnvironment deploymentDescriptorEnvironment;
+
+    private final List<ViewDescription> views = new ArrayList<ViewDescription>();
 
     /**
      * Construct a new instance.
@@ -385,7 +388,29 @@ public abstract class AbstractComponentDescription extends AbstractLifecycleCapa
     protected void prepareComponentConfiguration(AbstractComponentConfiguration configuration, DeploymentPhaseContext phaseContext) throws DeploymentUnitProcessingException {
         final DeploymentUnit deploymentUnit = phaseContext.getDeploymentUnit();
         final Module module = deploymentUnit.getAttachment(org.jboss.as.server.deployment.Attachments.MODULE);
+        final ModuleClassLoader moduleClassLoader = module.getClassLoader();
         final DeploymentReflectionIndex index = deploymentUnit.getAttachment(org.jboss.as.server.deployment.Attachments.REFLECTION_INDEX);
+
+        // TODO: Temporary...
+        final ServiceName baseName = deploymentUnit.getServiceName().append("component").append(componentName);
+        for (ViewDescription view : views) {
+            final String viewClassName = view.getViewClassName();
+            final Class<?> viewClass;
+            try {
+                viewClass = Class.forName(viewClassName, false, moduleClassLoader);
+            } catch (ClassNotFoundException e) {
+                throw new DeploymentUnitProcessingException("Unable to load view class '" + viewClassName + "'", e);
+            }
+            final ProxyFactory<?> proxyFactory = createProxyFactory(viewClass);
+            final List<String> viewNameParts = view.getViewNameParts();
+            final ServiceName viewServiceName = baseName.append("VIEW").append(viewNameParts.toArray(new String[viewNameParts.size()]));
+            final ViewConfiguration viewConfiguration = new ViewConfiguration(viewClass, configuration, viewServiceName, proxyFactory);
+            for (ViewConfigurator configurator : view.getConfigurators()) {
+                configurator.configure(configuration, view, viewConfiguration);
+            }
+            configuration.getViews().add(viewConfiguration);
+        }
+        // End TODO: Temporary...
 
         // Create the table of component class methods
         final Map<MethodIdentifier, Method> componentMethods = new HashMap<MethodIdentifier, Method>();
@@ -428,7 +453,7 @@ public abstract class AbstractComponentDescription extends AbstractLifecycleCapa
                 for(Map.Entry<String, InterceptorMethodDescription> entry : aroundInvokeMethods.entrySet()) {
                     try {
                         final InterceptorMethodDescription aroundInvoke = entry.getValue();
-                        final Class<?> methodDeclaringClass = module.getClassLoader().loadClass(entry.getKey());
+                        final Class<?> methodDeclaringClass = moduleClassLoader.loadClass(entry.getKey());
                         final ClassReflectionIndex<?> methodDeclaringClassIndex = index.getClassIndex(methodDeclaringClass);
                         //we know what the signature is
                         final Method aroundInvokeMethod = methodDeclaringClassIndex.getMethod(Object.class, aroundInvoke.getIdentifier().getName(), InvocationContext.class);
@@ -509,6 +534,18 @@ public abstract class AbstractComponentDescription extends AbstractLifecycleCapa
         for (Map.Entry<ServiceName, ServiceBuilder.DependencyType> entry : dependencies.entrySet()) {
             InjectedValue<Object> value = new InjectedValue<Object>();
             dependencyInjections.put(entry.getKey(), value);
+        }
+    }
+
+    /*
+     * TODO: remove this
+     */
+    @Deprecated
+    private static <T> ProxyFactory<?> createProxyFactory(final Class<T> type) {
+        if (type.isInterface()) {
+            return new ProxyFactory<Object>(Object.class, type);
+        } else {
+            return new ProxyFactory<T>(type);
         }
     }
 
@@ -636,6 +673,15 @@ public abstract class AbstractComponentDescription extends AbstractLifecycleCapa
 
     public void setDeploymentDescriptorEnvironment(DeploymentDescriptorEnvironment deploymentDescriptorEnvironment) {
         this.deploymentDescriptorEnvironment = deploymentDescriptorEnvironment;
+    }
+
+    /**
+     * Get the list of views which apply to this component.
+     *
+     * @return the list of views
+     */
+    public List<ViewDescription> getViews() {
+        return views;
     }
 
     @Override

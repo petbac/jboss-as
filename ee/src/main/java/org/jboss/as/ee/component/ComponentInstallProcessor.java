@@ -34,7 +34,6 @@ import org.jboss.as.server.deployment.DeploymentUnit;
 import org.jboss.as.server.deployment.DeploymentUnitProcessingException;
 import org.jboss.as.server.deployment.DeploymentUnitProcessor;
 import org.jboss.as.server.deployment.reflect.DeploymentReflectionIndex;
-import org.jboss.invocation.proxy.ProxyFactory;
 import org.jboss.modules.Module;
 import org.jboss.modules.ModuleClassLoader;
 import org.jboss.msc.service.ServiceBuilder;
@@ -170,15 +169,18 @@ public final class ComponentInstallProcessor implements DeploymentUnitProcessor 
         startBuilder.addDependencies(additionalDependencies);
 
         // Iterate through each view, creating the services for each
-        for (Map.Entry<Class<?>, ProxyFactory<?>> entry : configuration.getProxyFactories().entrySet()) {
-            final Class<?> viewClass = entry.getKey();
-            final ServiceName serviceName = baseName.append("VIEW").append(viewClass.getName());
-            final ProxyFactory<?> proxyFactory = entry.getValue();
-            final ViewService viewService = new ViewService(viewClass, proxyFactory);
+        for (ViewConfiguration viewConfiguration : configuration.getViews()) {
+            final ServiceName serviceName = viewConfiguration.getViewServiceName();
+            final ViewService viewService = new ViewService(viewConfiguration);
             serviceTarget.addService(serviceName, viewService)
-                    .addDependency(createServiceName, AbstractComponent.class, viewService.getComponentInjector())
+                    .addDependency(createServiceName, Component.class, viewService.getComponentInjector())
                     .install();
-            configuration.getViewServices().put(viewClass, serviceName);
+            for (BindingConfiguration bindingConfiguration : viewConfiguration.getBindingConfigurations()) {
+                final String bindingName = bindingConfiguration.getName();
+                final BinderService service = new BinderService(bindingName);
+                ServiceBuilder<ManagedReferenceFactory> serviceBuilder = serviceTarget.addService(ContextNames.serviceNameOfContext(applicationName, moduleName, componentName, bindingName), service);
+                bindingConfiguration.getResourceValue(serviceBuilder, phaseContext, service.getManagedObjectInjector());
+            }
         }
 
         // Iterate through each binding/injection, creating the JNDI binding and wiring dependencies for each

@@ -75,19 +75,6 @@ public interface Component {
     void destroyInstance(ComponentInstance instance);
 
     /**
-     * Create a new client entry point for this component.  The returned entry point will contain the necessary logic to
-     * locate the appropriate instance, perform security checks, etc. as well as perform the final invocation.  The
-     * returned handler may or may not be shared; generally shared handlers will ignore their {@code destroy()} method.
-     * <p>
-     * The given view type must be one of the registered view types for this component.
-     *
-     * @param view the view type
-     * @return the client entry point
-     * @throws IllegalArgumentException if the view class is not know
-     */
-    ComponentEntry createClient(Class<?> view) throws IllegalArgumentException;
-
-    /**
      * Create a new client interceptor for this component.  The returned interceptor will contain the necessary logic to
      * locate the appropriate instance.
      * <p>

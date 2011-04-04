@@ -31,7 +31,7 @@ import org.jboss.invocation.Interceptor;
  *
  * @author <a href="mailto:david.lloyd@redhat.com">David M. Lloyd</a>
  */
-public interface ComponentEntry {
+public interface ComponentViewInstance {
 
     /**
      * Get the component associated with this entry point.
@@ -48,6 +48,14 @@ public interface ComponentEntry {
     Class<?> getViewClass();
 
     /**
+     * Construct a new client proxy for this view instance.  The client proxy will have a new client
+     * interceptor chain.
+     *
+     * @return the client proxy
+     */
+    Object createProxy();
+
+    /**
      * Get the list of allowed methods for this invocation handler.  The handler will only accept invocations on
      * these exact {@code Method} objects.
      *
@@ -57,7 +65,8 @@ public interface ComponentEntry {
 
     /**
      * Get the entry point interceptor for the method.  The method must be one of the exact {@code Method} instances
-     * returned by {@link #allowedMethods()}.
+     * returned by {@link #allowedMethods()}.  This entry point enters into the view interceptor chain, not the
+     * client interceptor chain.
      *
      * @param method the method to invoke
      * @return the interceptor to invoke
@@ -69,10 +78,12 @@ public interface ComponentEntry {
      * Determine whether a given method on this view is asynchronous.  The method must be one of the exact {@code Method} instances
      * returned by {@link #allowedMethods()}.
      *
+     * @deprecated This only applies to EJBs so ultimately will end up there.
      * @param method the method to check
      * @return {@code true} if the method is asynchronous, {@code false} otherwise
      * @throws IllegalArgumentException if the method is not known to the component
      */
+    @Deprecated
     boolean isAsynchronous(Method method) throws IllegalArgumentException;
 
     /**
